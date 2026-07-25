@@ -14,19 +14,32 @@ from __future__ import annotations
 from typing import Callable
 
 from eval import corpus
+from eval.mock_agent import make_mock_llm
 from eval.qa_dataset import TASKS
-from harness.contracts import AgentLoop, ScoringFn, TaskResult, exact_match_scorer
+from harness.contracts import AgentLoop, LoopRunConfig, ScoringFn, TaskResult, exact_match_scorer
 from harness.tools import CalculatorTool, ScratchpadTool, WebSearchTool
 from harness import tracker
-
-# Populated as each loop pattern lands (Sprints 2-4): name -> factory
-# producing a fresh AgentLoop instance (fresh per run, so loops with
-# internal state like ScratchpadTool don't leak across tasks).
-LOOP_FACTORIES: dict[str, Callable[[], AgentLoop]] = {}
+from loops.react_loop import ReActLoop
 
 
 def default_tools() -> list:
     return [WebSearchTool(backend=corpus.search), CalculatorTool(), ScratchpadTool()]
+
+
+def _make_react_loop() -> AgentLoop:
+    return ReActLoop(
+        default_tools(),
+        make_mock_llm(),
+        config=LoopRunConfig(max_iterations=6, tool_backoff_base_s=0.0),
+    )
+
+
+# name -> factory producing a fresh AgentLoop instance (fresh per run, so
+# loops with internal state like ScratchpadTool don't leak across tasks).
+# reflection/plan_execute register here as they land in Sprints 3-4.
+LOOP_FACTORIES: dict[str, Callable[[], AgentLoop]] = {
+    "react": _make_react_loop,
+}
 
 
 def run_all(
