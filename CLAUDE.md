@@ -53,9 +53,10 @@ On Windows the venv's Python is at `.venv/Scripts/python`, not
 ## Architecture
 
 ```
-harness/       shared contracts: Task, Tool, AgentLoop, ToolResult, TaskResult
-loops/         one file per pattern: react_loop.py, reflection_loop.py, plan_execute_loop.py
-eval/          QA dataset + comparison runner
+harness/       shared contracts: Task, Tool, AgentLoop, ToolResult, TaskResult, reliability
+loops/         one file per pattern: react_loop.py, reflection_loop.py, plan_execute_loop.py, common.py
+eval/          QA dataset, corpus, comparison runner, mock LLM policy, CI regression gate
+service/       FastAPI service: submit a task, poll for its result
 tests/         unit + integration tests, run in CI on every PR
 docs/adrs/     one ADR per loop pattern documenting observed trade-offs
 ```
@@ -95,14 +96,52 @@ run; `log_result` logs a `TaskResult`'s metrics + trace artifact;
 cross-pattern comparison artifact — call once after a full eval sweep,
 not per-task.
 
+### `harness/reliability.py`
+
+Shared reliability primitives every loop inherits unchanged: `new_checkpointer()`
+(LangGraph `MemorySaver`), `CircuitBreaker` (per-tool consecutive-failure
+counter — `AgentLoop._call_tool` consults it before every call and
+short-circuits after `LoopRunConfig.circuit_breaker_threshold` whole-call
+failures in a row), `Timeout` (wall-clock deadline checked between graph
+steps, not preemptive mid-node), and `run_graph()` — the single helper
+every loop's `run()` calls instead of `self._graph.invoke(...)`, so
+checkpoint-resume-on-crash and timeout enforcement are identical across
+patterns. Extend reliability behavior here, never inside one loop file.
+
 ### Loop patterns (`loops/`)
 
 Each pattern is one file, implemented as a LangGraph `StateGraph` with
-conditional edges for routing (continue looping / replan / terminate).
-Reliability behavior (retries, and later checkpointing/circuit breakers)
-lives in the shared harness layer, not duplicated per pattern — a loop
-file should only contain the reasoning/control-flow logic specific to
-that pattern.
+conditional edges for routing (continue looping / replan / terminate),
+compiled with a checkpointer, and run via `harness.reliability.run_graph`.
+`loops/common.py` holds the ACTION/FINAL_ANSWER tool-use protocol
+(prompt formatting, action parsing) shared by every pattern that lets the
+LLM call a tool mid-reasoning — extend it there, not per-pattern, if the
+protocol needs to change. Reliability behavior lives in the shared
+harness layer, not duplicated per pattern — a loop file should only
+contain the reasoning/control-flow logic specific to that pattern.
+
+### `eval/mock_agent.py`
+
+A deterministic, stateless (prompt-in, text-out) mock reasoning policy
+shared by all three loops, used because no live LLM API key is configured
+in this environment (see `harness/llm.py`'s `LLM`/`MockLLM`/`ScriptedLLM`).
+It issues one search and a naive one-sentence extraction as the final
+answer — **not a real reasoning policy**. It exists to validate loop
+*mechanism* (control flow, tool calls, termination) end-to-end, not
+accuracy — `eval/check_regression.py`'s CI gate checks for crash-free
+completion, not an accuracy floor, for the same reason. Wiring a real
+provider is one new `LLM` subclass in `harness/llm.py`; only then does a
+real accuracy comparison (and a real accuracy-floor CI gate) become
+meaningful.
+
+### `service/` — FastAPI service
+
+`service/app.py` exposes `POST /tasks` (submit a question + loop name,
+returns a `job_id` immediately) and `GET /tasks/{job_id}` (poll status/
+result). `service/jobs.py`'s `JobStore` runs each loop in a background
+thread so a multi-iteration run never blocks the submitting request.
+Dockerfile builds and serves it on port 8000 (`docker build -t recur .`
+then `docker run -p 8000:8000 recur`).
 
 ### Reference test suite (`tests/test_contracts.py`)
 
@@ -114,9 +153,11 @@ on a flaky tool, giving up after max retries, unknown-tool handling
 
 ## Delivery plan status
 
-Sprint 0 (harness & contract) is done — see `tests/test_contracts.py`
-(10 passing tests). Sprints 1-8 (benchmark, ReAct/Reflection/Plan-Execute
-loops, reliability layer, service layer, comparison writeup, polish) are
-tracked but not yet started. Each sprint has an explicit Definition of
-Done; scope that doesn't fit rolls into the next sprint rather than
-silently expanding the current one.
+Sprints 0-6 are done: shared harness + reliability layer, the 18-question
+multi-hop benchmark, all three loop patterns, and the FastAPI service —
+see `tests/` (66+ passing tests) and `.github/workflows/ci.yml` (runs the
+test suite plus `eval/check_regression.py` on every push/PR to `main`).
+Sprints 7-8 (full comparison writeup + ADRs, polish) are tracked but not
+yet started. Each sprint has an explicit Definition of Done; scope that
+doesn't fit rolls into the next sprint rather than silently expanding the
+current one.
