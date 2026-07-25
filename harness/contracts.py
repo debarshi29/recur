@@ -15,6 +15,8 @@ from typing import Any, Callable
 import time
 import uuid
 
+from harness.reliability import CircuitBreaker
+
 
 # ---------------------------------------------------------------------------
 # Tools
@@ -113,6 +115,7 @@ class LoopRunConfig:
     timeout_s: float = 60.0
     tool_max_retries: int = 2
     tool_backoff_base_s: float = 0.5
+    circuit_breaker_threshold: int = 3
 
 
 class AgentLoop(ABC):
@@ -128,6 +131,7 @@ class AgentLoop(ABC):
     def __init__(self, tools: list[Tool], config: LoopRunConfig | None = None):
         self.tools = {t.name: t for t in tools}
         self.config = config or LoopRunConfig()
+        self._circuit_breaker = CircuitBreaker(threshold=self.config.circuit_breaker_threshold)
 
     @abstractmethod
     def run(self, task: Task, scorer: ScoringFn = exact_match_scorer) -> TaskResult:
@@ -135,18 +139,34 @@ class AgentLoop(ABC):
 
     def _call_tool(self, tool_name: str, **kwargs) -> ToolResult:
         """Retry-with-backoff wrapper every loop should route tool calls
-        through, so reliability behavior is consistent across patterns."""
+        through, so reliability behavior is consistent across patterns.
+        Also enforces the per-tool circuit breaker: once a tool has failed
+        `circuit_breaker_threshold` whole calls in a row, further calls
+        short-circuit immediately instead of retrying, so a persistently
+        failing tool can't be retried into a hang across many iterations."""
         tool = self.tools.get(tool_name)
         if tool is None:
             return ToolResult(ok=False, output=None, error=f"Unknown tool: {tool_name}")
+
+        if self._circuit_breaker.is_open(tool_name):
+            return ToolResult(
+                ok=False,
+                output=None,
+                error=(
+                    f"Circuit breaker open for tool '{tool_name}' after "
+                    f"{self._circuit_breaker.threshold} consecutive failures; not retrying."
+                ),
+            )
 
         last_result: ToolResult | None = None
         for attempt in range(self.config.tool_max_retries + 1):
             last_result = tool.run(**kwargs)
             if last_result.ok:
+                self._circuit_breaker.record_success(tool_name)
                 return last_result
             if attempt < self.config.tool_max_retries:
                 time.sleep(self.config.tool_backoff_base_s * (2 ** attempt))
+        self._circuit_breaker.record_failure(tool_name)
         return last_result  # last failure, after exhausting retries
 
     @staticmethod
