@@ -44,7 +44,12 @@ def _naive_answer(observation: str) -> str:
 def policy(prompt: str) -> str:
     """One search, then a naive one-sentence extraction as the final
     answer -- exercises the full act/observe/answer control flow without
-    claiming to be a real reasoning policy."""
+    claiming to be a real reasoning policy. Reflection's critique prompts
+    are always accepted (GOOD) so the mock never revises -- a mock critic
+    can't meaningfully judge answer quality any better than the mock
+    drafter produced it."""
+    if "Candidate answer:" in prompt and "Critique the candidate answer" in prompt:
+        return "GOOD"
     if not _has_observation(prompt):
         question = _extract_question(prompt)
         kwargs_json = json.dumps({"query": question})
