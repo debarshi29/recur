@@ -8,15 +8,15 @@ control-loop architecture differs.
 """
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Callable
 import time
 import uuid
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
 from harness.reliability import CircuitBreaker
-
 
 # ---------------------------------------------------------------------------
 # Tools

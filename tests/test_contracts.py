@@ -6,7 +6,6 @@ from harness.contracts import (
     LoopRunConfig,
     Task,
     Tool,
-    ToolResult,
     exact_match_scorer,
 )
 
