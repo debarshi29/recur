@@ -12,7 +12,7 @@ import mlflow
 from harness.contracts import TaskResult
 
 
-def configure(tracking_uri: str = "file:./mlruns", experiment: str = "loop-engineering"):
+def configure(tracking_uri: str = "sqlite:///mlflow.db", experiment: str = "loop-engineering"):
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment)
 
