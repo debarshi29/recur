@@ -33,6 +33,7 @@ from harness.contracts import (
     exact_match_scorer,
 )
 from harness.llm import LLM
+from harness.reliability import new_checkpointer, run_graph
 from loops.common import ACTION_PREFIX, FINAL_PREFIX, parse_action, tool_lines
 
 PLAN_PREFIX = "PLAN:"
@@ -119,6 +120,7 @@ class PlanExecuteLoop(AgentLoop):
     def __init__(self, tools: list[Tool], llm: LLM, config: LoopRunConfig | None = None):
         super().__init__(tools, config)
         self.llm = llm
+        self.checkpointer = new_checkpointer()
         self._graph = self._build_graph()
 
     def _build_graph(self):
@@ -152,7 +154,7 @@ class PlanExecuteLoop(AgentLoop):
             {"execute": "execute", "replan": "replan", "end": END},
         )
         graph.add_edge("synthesize", END)
-        return graph.compile()
+        return graph.compile(checkpointer=self.checkpointer)
 
     # -- nodes --------------------------------------------------------
 
@@ -282,11 +284,14 @@ class PlanExecuteLoop(AgentLoop):
             "replans": 0,
             "final_answer": None,
         }
-        final_state = self._graph.invoke(
+        final_state = run_graph(
+            self._graph,
             initial_state,
-            config={"recursion_limit": self.config.max_iterations * 6 + 20},
+            thread_id=task.id,
+            timeout_s=self.config.timeout_s,
+            recursion_limit=self.config.max_iterations * 6 + 20,
         )
-        predicted = final_state["final_answer"] or ""
+        predicted = final_state.get("final_answer") or ""
         correct, score = scorer(predicted, task.gold_answer)
         return TaskResult(
             task_id=task.id,

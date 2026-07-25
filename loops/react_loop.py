@@ -6,8 +6,10 @@ Built as a LangGraph StateGraph with two nodes -- reason_act (ask the LLM
 for either a tool action or a final answer) and observe (execute that
 action through the shared harness's retry-wrapped _call_tool) -- looping
 between them until the LLM emits a final answer or max_iterations is hit.
-Reliability (tool retry/backoff) and scoring are inherited unchanged from
-AgentLoop; only this control-flow shape is pattern-specific.
+Reliability (tool retry/backoff, circuit breaking, checkpointed resume,
+and timeout enforcement) and scoring are inherited unchanged from
+AgentLoop/harness.reliability; only this control-flow shape is
+pattern-specific.
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ from harness.contracts import (
     exact_match_scorer,
 )
 from harness.llm import LLM
+from harness.reliability import new_checkpointer, run_graph
 from loops.common import ACTION_PREFIX, FINAL_PREFIX, parse_action, tool_lines
 
 
@@ -60,6 +63,7 @@ class ReActLoop(AgentLoop):
     def __init__(self, tools: list[Tool], llm: LLM, config: LoopRunConfig | None = None):
         super().__init__(tools, config)
         self.llm = llm
+        self.checkpointer = new_checkpointer()
         self._graph = self._build_graph()
 
     def _build_graph(self):
@@ -73,7 +77,7 @@ class ReActLoop(AgentLoop):
             {"observe": "observe", "end": END},
         )
         graph.add_edge("observe", "reason_act")
-        return graph.compile()
+        return graph.compile(checkpointer=self.checkpointer)
 
     def _reason_act(self, state: ReActState) -> ReActState:
         prompt = build_prompt(state["task"], self.tools, state["trace"])
@@ -116,11 +120,14 @@ class ReActLoop(AgentLoop):
             "total_tokens": 0,
             "final_answer": None,
         }
-        final_state = self._graph.invoke(
+        final_state = run_graph(
+            self._graph,
             initial_state,
-            config={"recursion_limit": self.config.max_iterations * 4 + 10},
+            thread_id=task.id,
+            timeout_s=self.config.timeout_s,
+            recursion_limit=self.config.max_iterations * 4 + 10,
         )
-        predicted = final_state["final_answer"] or ""
+        predicted = final_state.get("final_answer") or ""
         correct, score = scorer(predicted, task.gold_answer)
         return TaskResult(
             task_id=task.id,
