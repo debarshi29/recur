@@ -1,0 +1,26 @@
+[project]
+name = "recur"
+version = "0.1.0"
+description = "Head-to-head comparison of ReAct, Reflection, and Plan-Execute agentic loop architectures on a shared harness."
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "mlflow>=2.14",
+    "fastapi>=0.110",
+    "uvicorn>=0.30",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
