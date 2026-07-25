@@ -44,12 +44,32 @@ def _naive_answer(observation: str) -> str:
 def policy(prompt: str) -> str:
     """One search, then a naive one-sentence extraction as the final
     answer -- exercises the full act/observe/answer control flow without
-    claiming to be a real reasoning policy. Reflection's critique prompts
-    are always accepted (GOOD) so the mock never revises -- a mock critic
-    can't meaningfully judge answer quality any better than the mock
-    drafter produced it."""
+    claiming to be a real reasoning policy.
+
+    Reflection's critique prompts are always accepted (GOOD) so the mock
+    never revises -- a mock critic can't meaningfully judge answer quality
+    any better than the mock drafter produced it. Plan-Execute's plan
+    prompts get a fixed two-step plan (search, then answer); its execute
+    prompts search on the first call and either finish (final step) or
+    mark the step done (non-final step) once an observation exists; its
+    replan prompts (never reached by this policy, since it never emits
+    REPLAN itself) fall back to a fixed answer so a real REPLAN-capable
+    LLM's behavior can be exercised in tests without the mock looping."""
     if "Candidate answer:" in prompt and "Critique the candidate answer" in prompt:
         return "GOOD"
+    if "PLAN: step1 | step2" in prompt:
+        return "PLAN: search the corpus | answer the question"
+    if "The current step failed:" in prompt:
+        return "FINAL_ANSWER: unresolved"
+    if "Current step" in prompt:
+        if not _has_observation(prompt):
+            question = _extract_question(prompt)
+            kwargs_json = json.dumps({"query": question})
+            return f"ACTION: web_search | {kwargs_json}"
+        if "(final step)" in prompt:
+            observation = _last_observation(prompt)
+            return f"FINAL_ANSWER: {_naive_answer(observation)}"
+        return "STEP_DONE: noted"
     if not _has_observation(prompt):
         question = _extract_question(prompt)
         kwargs_json = json.dumps({"query": question})

@@ -19,6 +19,7 @@ from eval.qa_dataset import TASKS
 from harness.contracts import AgentLoop, LoopRunConfig, ScoringFn, TaskResult, exact_match_scorer
 from harness.tools import CalculatorTool, ScratchpadTool, WebSearchTool
 from harness import tracker
+from loops.plan_execute_loop import PlanExecuteLoop
 from loops.react_loop import ReActLoop
 from loops.reflection_loop import ReflectionLoop
 
@@ -43,12 +44,20 @@ def _make_reflection_loop() -> AgentLoop:
     )
 
 
+def _make_plan_execute_loop() -> AgentLoop:
+    return PlanExecuteLoop(
+        default_tools(),
+        make_mock_llm(),
+        config=LoopRunConfig(max_iterations=8, tool_backoff_base_s=0.0),
+    )
+
+
 # name -> factory producing a fresh AgentLoop instance (fresh per run, so
 # loops with internal state like ScratchpadTool don't leak across tasks).
-# plan_execute registers here as it lands in Sprint 4.
 LOOP_FACTORIES: dict[str, Callable[[], AgentLoop]] = {
     "react": _make_react_loop,
     "reflection": _make_reflection_loop,
+    "plan_execute": _make_plan_execute_loop,
 }
 
 
