@@ -153,11 +153,14 @@ on a flaky tool, giving up after max retries, unknown-tool handling
 
 ## Delivery plan status
 
-Sprints 0-6 are done: shared harness + reliability layer, the 18-question
-multi-hop benchmark, all three loop patterns, and the FastAPI service —
-see `tests/` (66+ passing tests) and `.github/workflows/ci.yml` (runs the
-test suite plus `eval/check_regression.py` on every push/PR to `main`).
-Sprints 7-8 (full comparison writeup + ADRs, polish) are tracked but not
-yet started. Each sprint has an explicit Definition of Done; scope that
-doesn't fit rolls into the next sprint rather than silently expanding the
-current one.
+All 8 sprints are done: shared harness + reliability layer, the
+18-question multi-hop benchmark, all three loop patterns, the FastAPI
+service, and the comparison writeup + per-pattern ADRs (`docs/writeup.md`,
+`docs/adrs/`) — see `tests/` (66+ passing tests) and
+`.github/workflows/ci.yml` (runs the test suite plus
+`eval/check_regression.py` on every push/PR to `main`). The main tracked
+follow-up is wiring a real LLM into `harness/llm.py` so accuracy (not just
+structural cost) becomes a meaningful cross-pattern signal — see
+`docs/writeup.md`'s caveat. Each sprint had an explicit Definition of
+Done; keep that discipline for any future work here rather than letting
+scope silently expand.

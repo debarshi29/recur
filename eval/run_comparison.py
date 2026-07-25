@@ -11,14 +11,14 @@ in later sprints -- each just needs to register a factory in
 """
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from eval import corpus
 from eval.mock_agent import make_mock_llm
 from eval.qa_dataset import TASKS
+from harness import tracker
 from harness.contracts import AgentLoop, LoopRunConfig, ScoringFn, TaskResult, exact_match_scorer
 from harness.tools import CalculatorTool, ScratchpadTool, WebSearchTool
-from harness import tracker
 from loops.plan_execute_loop import PlanExecuteLoop
 from loops.react_loop import ReActLoop
 from loops.reflection_loop import ReflectionLoop

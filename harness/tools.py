@@ -36,7 +36,7 @@ class CalculatorTool(Tool):
         allowed = set("0123456789+-*/(). ")
         if not set(expression) <= allowed:
             raise ValueError(f"Disallowed characters in expression: {expression!r}")
-        return eval(expression, {"__builtins__": {}}, {})  # noqa: S307 — sandboxed
+        return eval(expression, {"__builtins__": {}}, {})
 
 
 class ScratchpadTool(Tool):

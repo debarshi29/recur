@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-import eval.check_regression as check_regression
+from eval import check_regression
 from harness.contracts import AgentLoop, ScoringFn, Task, TaskResult, exact_match_scorer
 
 

@@ -10,14 +10,29 @@ variable under test is the control-loop architecture itself.
 
 ## Status
 
-Sprints 0-6 complete: shared harness, benchmark, all three loop patterns,
-a reliability layer (checkpointing, circuit breaker, timeout), and a
-FastAPI service. See `docs/` for the sprint plan and ADRs as they land.
+All 8 sprints complete: shared harness, an 18-question multi-hop
+benchmark, all three loop patterns, a reliability layer (checkpointing,
+circuit breaker, timeout), a FastAPI service, and a full comparison
+writeup with per-pattern ADRs.
 
 Loop reasoning currently runs against a deterministic mock LLM
 (`harness/llm.py`, `eval/mock_agent.py`) since no live provider key is
 configured -- see those modules' docstrings for what that does and
 doesn't validate. Wiring a real provider is a single new `LLM` subclass.
+
+## Results
+
+See [`docs/writeup.md`](docs/writeup.md) for the full cross-pattern
+comparison and per-task-shape recommendation, and `docs/adrs/` for the
+per-pattern design decisions. Headline structural numbers from a real
+measured run (mock-LLM policy -- see the writeup's caveat on why accuracy
+isn't yet a meaningful signal):
+
+| pattern | avg iterations/task | avg tool calls/task | avg tokens/task |
+|---|---|---|---|
+| ReAct | 2.00 | 1.00 | 343.4 |
+| Reflection | 3.00 | 1.00 | 403.3 |
+| Plan-Execute | 5.00 | 2.00 | 921.4 |
 
 ## Layout
 
