@@ -11,7 +11,6 @@ AgentLoop; only this control-flow shape is pattern-specific.
 """
 from __future__ import annotations
 
-import json
 import time
 from typing import Any, TypedDict
 
@@ -27,9 +26,7 @@ from harness.contracts import (
     exact_match_scorer,
 )
 from harness.llm import LLM
-
-FINAL_PREFIX = "FINAL_ANSWER:"
-ACTION_PREFIX = "ACTION:"
+from loops.common import ACTION_PREFIX, FINAL_PREFIX, parse_action, tool_lines
 
 
 class ReActState(TypedDict):
@@ -42,7 +39,6 @@ class ReActState(TypedDict):
 
 
 def build_prompt(task: Task, tools: dict[str, Tool], trace: list[dict[str, Any]]) -> str:
-    tool_lines = "\n".join(f"- {name}: {tool.description}" for name, tool in tools.items())
     history_lines: list[str] = []
     for step in trace:
         history_lines.append(f"Thought/Action: {step['thought']}")
@@ -51,20 +47,11 @@ def build_prompt(task: Task, tools: dict[str, Tool], trace: list[dict[str, Any]]
     history = "\n".join(history_lines) if history_lines else "(none yet)"
     return (
         f"Question: {task.question}\n\n"
-        f"Available tools:\n{tool_lines}\n\n"
+        f"Available tools:\n{tool_lines(tools)}\n\n"
         f"History so far:\n{history}\n\n"
         f"Respond with exactly one line: either '{FINAL_PREFIX} <answer>' or "
         f"'{ACTION_PREFIX} <tool_name> | <json kwargs>'."
     )
-
-
-def parse_action(text: str) -> tuple[str, dict[str, Any]]:
-    body = text[len(ACTION_PREFIX):].strip()
-    name_part, _, kwargs_part = body.partition("|")
-    name = name_part.strip()
-    kwargs_part = kwargs_part.strip()
-    kwargs = json.loads(kwargs_part) if kwargs_part else {}
-    return name, kwargs
 
 
 class ReActLoop(AgentLoop):
