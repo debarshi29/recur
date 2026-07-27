@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from eval.run_comparison import run_all
+from eval.run_comparison import LOOP_FACTORIES, REAL_LLM_LOOP_FACTORIES, run_all
 from harness.contracts import AgentLoop, ScoringFn, Task, TaskResult, exact_match_scorer
 
 
@@ -51,3 +51,11 @@ def test_run_all_runs_every_loop_over_every_task():
     assert len(results) == 2
     assert {r.task_id for r in results} == {"t1", "t2"}
     assert all(r.loop_name == "stub" and r.correct for r in results)
+
+
+def test_real_llm_factories_register_the_same_patterns_as_mock():
+    # Not invoked here -- constructing a real loop requires GROQ_API_KEY
+    # and hits the network. This just guards the two registries from
+    # drifting apart (e.g. a pattern added to one and forgotten in the
+    # other).
+    assert set(REAL_LLM_LOOP_FACTORIES) == set(LOOP_FACTORIES)
