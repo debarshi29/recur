@@ -15,18 +15,30 @@ benchmark, all three loop patterns, a reliability layer (checkpointing,
 circuit breaker, timeout), a FastAPI service, and a full comparison
 writeup with per-pattern ADRs.
 
-Loop reasoning currently runs against a deterministic mock LLM
-(`harness/llm.py`, `eval/mock_agent.py`) since no live provider key is
-configured -- see those modules' docstrings for what that does and
-doesn't validate. Wiring a real provider is a single new `LLM` subclass.
+Loop reasoning can run against either a deterministic mock LLM
+(`eval/mock_agent.py`, no API key needed -- validates control-flow
+mechanism, not accuracy) or a real provider, `GroqLLM`
+(`harness/llm.py`, requires `GROQ_API_KEY` -- see `.env.example`).
+`python -m eval.run_comparison --llm mock|groq` selects between them.
 
 ## Results
 
 See [`docs/writeup.md`](docs/writeup.md) for the full cross-pattern
-comparison and per-task-shape recommendation, and `docs/adrs/` for the
-per-pattern design decisions. Headline structural numbers from a real
-measured run (mock-LLM policy -- see the writeup's caveat on why accuracy
-isn't yet a meaningful signal):
+comparison, the real-LLM run's caveats (scorer strictness, Reflection's
+convergence behavior), and per-task-shape recommendation; `docs/adrs/`
+has the per-pattern design decisions.
+
+Real-LLM run (Groq `llama-3.3-70b-versatile`, `exact_match_scorer` --
+see the writeup for why this is a lower bound on accuracy):
+
+| pattern | accuracy | avg iterations/task | avg tool calls/task | avg tokens/task |
+|---|---|---|---|---|
+| ReAct | 27.8% | 2.06 | 1.06 | 560.4 |
+| Reflection | 0.0% | 5.22 | 1.44 | 1661.0 |
+| Plan-Execute | 11.1% | 4.39 | 2.33 | 1771.3 |
+
+Mock-policy run (mechanism validation only -- accuracy isn't meaningful
+here, see the writeup):
 
 | pattern | avg iterations/task | avg tool calls/task | avg tokens/task |
 |---|---|---|---|
