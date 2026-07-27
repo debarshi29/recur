@@ -10,13 +10,19 @@ synthesizes.
 
 ## Read this caveat before the numbers
 
-Every number below comes from a **real, measured run** of all three loops
-against the 18-question multi-hop benchmark (`eval/qa_dataset.py`) — no
-number here is estimated or invented. But the run uses a deterministic
-**mock reasoning policy** (`eval/mock_agent.py`), not a real LLM, because
-no live provider API key is configured in this environment. The mock
-policy issues one fixed search-then-answer strategy regardless of loop
-pattern, so:
+This writeup now has two measured runs: an original **mock-policy run**
+(deterministic, no LLM, validates control-flow mechanism only) and a new
+**real-LLM run** against Groq (`llama-3.3-70b-versatile`, via
+`harness/llm.py`'s `GroqLLM`), which is the first run where accuracy is a
+real signal at all. Both are kept below rather than overwriting the mock
+numbers, since the mock run remains the reference for "does the control
+flow work," while the real run is the reference for "how do the patterns
+actually perform."
+
+### Mock-policy run (mechanism validation, not accuracy)
+
+The mock policy issues one fixed search-then-answer strategy regardless
+of loop pattern, so:
 
 - **Structural metrics (iterations, tool calls, tokens, wall-clock) are
   real and pattern-differentiated** — they reflect each pattern's actual
@@ -26,23 +32,58 @@ pattern, so:
   never exact-matches the gold answers, identically across patterns. This
   says nothing about which architecture reasons better.
 
-Wiring a real provider is one new `LLM` subclass in `harness/llm.py`; the
-rest of the harness, benchmark, and comparison runner need no changes to
-produce a real accuracy comparison. That is the natural next step before
-treating this as a finished benchmark result rather than an architecture
-and infrastructure validation.
-
-## Comparison table (real, measured, mock-policy run)
-
 | pattern | avg iterations/task | avg tool calls/task | avg tokens/task | avg wall-clock/task | cost vs. ReAct |
 |---|---|---|---|---|---|
 | **ReAct** | 2.00 | 1.00 | 343.4 | 7.1ms | 1.0x (baseline) |
 | **Reflection** | 3.00 | 1.00 | 403.3 | 7.6ms | ~1.2x tokens |
 | **Plan-Execute** | 5.00 | 2.00 | 921.4 | 11.7ms | ~2.7x tokens |
 
-Reproduce with `python -m eval.run_comparison` (writes to
+Reproduce with `python -m eval.run_comparison --llm mock` (writes to
 `sqlite:///mlflow.db`; inspect via `mlflow ui --backend-store-uri
 sqlite:///mlflow.db`).
+
+### Real-LLM run (Groq `llama-3.3-70b-versatile`)
+
+Reproduce with `python -m eval.run_comparison --llm groq` (requires
+`GROQ_API_KEY`, see `.env.example`).
+
+| pattern | accuracy | avg iterations/task | avg tool calls/task | avg tokens/task | avg wall-clock/task |
+|---|---|---|---|---|---|
+| **ReAct** | 27.8% (5/18) | 2.06 | 1.06 | 560.4 | 4.3s |
+| **Reflection** | 0.0% (0/18) | 5.22 | 1.44 | 1661.0 | 12.9s |
+| **Plan-Execute** | 11.1% (2/18) | 4.39 | 2.33 | 1771.3 | 10.8s |
+
+**Two things in this table need explanation before they're read as
+"Reflection is bad" and "ReAct wins":**
+
+1. **`exact_match_scorer` is too strict for free-text LLM answers, and it
+   is depressing every pattern's accuracy roughly equally.** Inspecting
+   traces directly shows answers marked `correct=False` that are
+   substantively right — e.g. task `q14`'s gold answer is `when features
+   are sparse`; ReAct's prediction was `when features are sparse.` (one
+   trailing period). Task `q17`'s gold is `Elhage et al., 2021`; ReAct's
+   prediction was `Elhage et al. in 2021.` — correct content, different
+   surface form, scored wrong. The mock-run's scoring caveat ("accuracy
+   isn't meaningful") has now been replaced by a narrower one: **accuracy
+   here is a lower bound**, and a real comparison needs a scorer that
+   tolerates paraphrase (substring/containment check, or an LLM-judge)
+   before the gap between patterns can be trusted. This is now the
+   project's next concrete follow-up, not "wire a real LLM" (done).
+2. **Reflection's 0% is a real, reproducible behavior, not a scoring
+   artifact** — and it's the most interesting finding in this run.
+   Tracing `reflection`'s runs shows the critique step repeatedly
+   rejecting substantively correct drafts with increasingly pedantic
+   feedback ("lacks... additional context," "unclear... without external
+   verification") rather than ever emitting `GOOD`, so the loop exhausts
+   `max_iterations` (6) and returns an empty final answer — scored wrong
+   regardless of scorer strictness, since there's no answer to score. Only
+   1 of 18 tasks converged to `GOOD` before the cap. This is a known
+   failure mode of naive self-critique loops: without an explicit
+   "good enough" bar or a critique budget separate from the draft budget,
+   a sufficiently capable critic can nitpick a correct-but-imperfect
+   answer forever. Plan-Execute doesn't hit this because it never
+   critiques — it only replans on tool *failure*, which this benchmark's
+   corpus search rarely produces.
 
 ## What this run validates
 
@@ -60,37 +101,47 @@ sqlite:///mlflow.db`).
    behavior from `harness/reliability.py`, verified directly in
    `tests/test_reliability.py` rather than reimplemented per loop.
 4. **The replan-on-failure path is implemented and tested**
-   (`tests/test_plan_execute_loop.py`), but not exercised by this
-   particular benchmark sweep, since the mock policy never triggers a
-   tool failure that would prompt a `REPLAN`.
+   (`tests/test_plan_execute_loop.py`), but not exercised by either sweep,
+   since the corpus search backend rarely fails and neither policy
+   triggers a `REPLAN`.
+5. **A real LLM validates the cost-scaling predictions from the mock run
+   and adds one the mock run couldn't show: self-critique needs a
+   convergence bound.** Reflection's real avg iterations (5.22, near the
+   6-iteration cap) and 0% convergence-to-`GOOD` rate is a genuine
+   architectural finding — see the caveat above — not visible under a
+   mock critic that always says `GOOD` immediately.
 
-## Recommendation, by task shape (architectural reasoning, pending real-LLM validation)
+## Recommendation, by task shape
 
 - **Shallow, single-hop lookups:** ReAct. Paying for a critique step or an
   upfront plan buys nothing when one search answers the question, and
   ReAct's cost profile is the cheapest of the three on every axis
-  measured here.
-- **Tasks where a first-pass answer is often subtly wrong in a
-  catchable way** (arithmetic slips, unsupported claims, missing a
-  qualifier) but a plan wouldn't help avoid the mistake in the first
-  place: Reflection. The fixed one-extra-call cost is worth it exactly
-  when critique quality is good enough to catch more errors than it
-  introduces — a claim this run cannot verify without a real LLM, since
-  the mock critique never revises.
+  measured here — and it's now also the highest-accuracy pattern measured
+  (27.8%, vs. 11.1% and 0%), even accounting for `exact_match_scorer`
+  depressing all three roughly equally.
+- **Reflection, as implemented here, is not recommended without a
+  convergence bound.** The real run shows its core assumption — a fixed
+  one-extra-call cost buys error-catching — doesn't hold once the critic
+  is a real, capable LLM: it nitpicks rather than converging, so the cost
+  is closer to `max_iterations`-worth of calls (in this run, ~2.5x
+  ReAct's tokens) for a worse, not better, accuracy outcome. Fixing this
+  is a scope-bounded follow-up: cap critique rounds separately from draft
+  rounds, or accept the best draft seen if no round reaches `GOOD`, rather
+  than returning empty on cap-out.
 - **Genuinely multi-hop tasks needing dependent steps** (the kind
   `eval/qa_dataset.py` tags `expected_hops >= 2`, 12 of the 18 questions):
-  Plan-Execute, on the hypothesis that an upfront plan avoids the
-  step-by-step wandering ReAct is prone to on tasks needing lookahead.
-  This is the pattern's strongest theoretical case and also its highest
-  structural cost (2.7x tokens) — worth it only if its accuracy on
-  exactly these multi-hop-tagged questions is measurably better than
-  ReAct's, which requires a real LLM to test.
+  Plan-Execute's theoretical case — an upfront plan avoids ReAct's
+  step-by-step wandering — isn't borne out in this run (11.1% vs. ReAct's
+  27.8%), but 18 tasks and one scoring pass is too small a sample and too
+  blunt a scorer to treat that as disproof. Worth re-testing once a
+  paraphrase-tolerant scorer is in place.
 
 **Bottom line:** this project's infrastructure — harness, benchmark,
-reliability layer, and comparison tooling — is complete and validated.
-The interview-defensible claim today is architectural and cost-based
-("Plan-Execute costs 2.7x ReAct in tokens because its cost scales with
-plan length, not because it's inherently 'better'"), not yet an accuracy
-claim. Wiring a real LLM into `harness/llm.py` and re-running
-`eval/run_comparison.py` is the next step to make the accuracy half of
-this comparison as defensible as the cost half already is.
+reliability layer, comparison tooling, and now a real LLM provider — is
+complete and validated, and the accuracy comparison this writeup called
+for is no longer hypothetical. The two concrete follow-ups this real run
+surfaced are: (1) replace `exact_match_scorer` with something paraphrase-
+tolerant so the accuracy gap between patterns can be trusted rather than
+read as a floor, and (2) give Reflection's critique loop a convergence
+bound so it stops trading Plan-Execute's cost for worse accuracy than
+ReAct.
