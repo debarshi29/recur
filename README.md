@@ -26,11 +26,12 @@ mechanism, not accuracy) or a real provider, `GroqLLM`
 eval.run_comparison --llm mock|groq` selects between them; CI always uses
 `mock` so it stays deterministic and API-key-free.
 
-**Open follow-ups** (see `docs/writeup.md` for the findings behind them):
-`exact_match_scorer` under-counts substantively-correct free-text answers
-and needs a paraphrase-tolerant replacement, and Reflection's critique
-step needs a convergence bound so it stops nitpicking correct drafts
-indefinitely.
+The two follow-ups the first real-LLM run surfaced are both resolved:
+`paraphrase_scorer` (default scorer, selectable with `--scorer
+exact|paraphrase`) replaces `exact_match_scorer`'s strict string match,
+and `ReflectionLoop`'s `max_critique_rounds` bounds how many times a
+draft gets revised before being force-accepted. See `docs/writeup.md`
+for the before/after traces and re-measured numbers.
 
 ## Quickstart
 
@@ -57,14 +58,16 @@ comparison, the real-LLM run's caveats (scorer strictness, Reflection's
 convergence behavior), and per-task-shape recommendations; `docs/adrs/`
 has the per-pattern design decisions and trade-offs.
 
-**Real-LLM run** (Groq `llama-3.3-70b-versatile`, `exact_match_scorer` —
-see the writeup for why this is a lower bound on accuracy):
+**Real-LLM run** (Groq `llama-3.3-70b-versatile`, `paraphrase_scorer`,
+`max_critique_rounds=3` — see the writeup for the first, unbounded/
+strict-scored pass and the traces showing why these fixes changed the
+numbers this much):
 
 | pattern | accuracy | avg iterations/task | avg tool calls/task | avg tokens/task |
 |---|---|---|---|---|
-| ReAct | 27.8% | 2.06 | 1.06 | 560.4 |
-| Reflection | 0.0% | 5.22 | 1.44 | 1661.0 |
-| Plan-Execute | 11.1% | 4.39 | 2.33 | 1771.3 |
+| ReAct | 88.9% | 2.00 | 1.00 | 546.2 |
+| Reflection | 83.3% | 5.61 | 1.22 | 1656.8 |
+| Plan-Execute | 72.2% | 4.39 | 2.22 | 1642.7 |
 
 **Mock-policy run** (mechanism validation only — accuracy isn't
 meaningful here, see the writeup):
