@@ -101,3 +101,37 @@ def test_reflection_loop_stops_at_max_iterations_without_crashing():
 
     assert result.iterations == 4
     assert result.correct is False
+
+
+def test_reflection_loop_force_accepts_draft_after_max_critique_rounds():
+    """A critic that never says GOOD shouldn't burn the whole
+    max_iterations budget or return an empty answer -- max_critique_rounds
+    should force-accept the current draft first."""
+    llm = MockLLM(lambda prompt: "REVISE: never satisfied" if "Candidate answer" in prompt else "FINAL_ANSWER: 4")
+    config = LoopRunConfig(max_iterations=20, tool_backoff_base_s=0.0)
+    loop = ReflectionLoop([CalculatorTool()], llm, config=config, max_critique_rounds=2)
+    task = Task(id="t1", question="What is 2+2?", gold_answer="4")
+
+    result = loop.run(task)
+
+    assert result.predicted_answer == "4"
+    assert result.correct is True
+    # 2 draft/critique rounds, forced accept on the 2nd critique -- well
+    # under the max_iterations=20 budget.
+    assert result.iterations == 4
+
+
+def test_reflection_loop_falls_back_to_best_draft_on_iteration_cap():
+    """If max_iterations is hit while still mid-revision (e.g.
+    max_critique_rounds set high relative to max_iterations), the loop
+    should return the last real draft rather than an empty answer."""
+    llm = MockLLM(lambda prompt: "REVISE: never satisfied" if "Candidate answer" in prompt else "FINAL_ANSWER: 4")
+    config = LoopRunConfig(max_iterations=4, tool_backoff_base_s=0.0)
+    loop = ReflectionLoop([CalculatorTool()], llm, config=config, max_critique_rounds=100)
+    task = Task(id="t1", question="never accepted", gold_answer="anything")
+
+    result = loop.run(task)
+
+    assert result.iterations == 4
+    assert result.predicted_answer == "4"
+    assert result.correct is False
