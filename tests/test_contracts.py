@@ -7,6 +7,7 @@ from harness.contracts import (
     Task,
     Tool,
     exact_match_scorer,
+    paraphrase_scorer,
 )
 
 
@@ -133,6 +134,21 @@ def test_exact_match_scorer(predicted, gold, expected_ok):
     ok, score = exact_match_scorer(predicted, gold)
     assert ok is expected_ok
     assert score == (1.0 if expected_ok else 0.0)
+
+
+@pytest.mark.parametrize(
+    "predicted,gold,expected_ok,expected_score",
+    [
+        ("Paris", "Paris", True, 1.0),
+        ("when features are sparse.", "when features are sparse", True, 1.0),
+        ("Elhage et al. in 2021.", "Elhage et al., 2021", True, 0.9),
+        ("London", "Paris", False, 0.0),
+    ],
+)
+def test_paraphrase_scorer(predicted, gold, expected_ok, expected_score):
+    ok, score = paraphrase_scorer(predicted, gold)
+    assert ok is expected_ok
+    assert score == expected_score
 
 
 # ---------------------------------------------------------------------------

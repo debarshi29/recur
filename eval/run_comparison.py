@@ -25,7 +25,14 @@ from eval import corpus
 from eval.mock_agent import make_mock_llm
 from eval.qa_dataset import TASKS
 from harness import tracker
-from harness.contracts import AgentLoop, LoopRunConfig, ScoringFn, TaskResult, exact_match_scorer
+from harness.contracts import (
+    AgentLoop,
+    LoopRunConfig,
+    ScoringFn,
+    TaskResult,
+    exact_match_scorer,
+    paraphrase_scorer,
+)
 from harness.llm import GroqLLM
 from harness.tools import CalculatorTool, ScratchpadTool, WebSearchTool
 from loops.plan_execute_loop import PlanExecuteLoop
@@ -102,6 +109,17 @@ REAL_LLM_LOOP_FACTORIES: dict[str, Callable[[], AgentLoop]] = {
     "plan_execute": _make_plan_execute_loop_real,
 }
 
+# Selectable via --scorer. paraphrase_scorer is the default: exact_match_scorer
+# marks substantively-correct free-text answers wrong over trivial
+# phrasing/punctuation differences (see docs/writeup.md's real-LLM section),
+# which understated every pattern's accuracy roughly equally. Kept selectable
+# rather than removed so a caller can still reproduce the original strict
+# numbers.
+SCORERS: dict[str, ScoringFn] = {
+    "paraphrase": paraphrase_scorer,
+    "exact": exact_match_scorer,
+}
+
 
 def run_all(
     loop_factories: dict[str, Callable[[], AgentLoop]] | None = None,
@@ -138,11 +156,21 @@ def main() -> None:
         default="mock",
         help="mock: deterministic, no API key needed (default). groq: real provider, requires GROQ_API_KEY.",
     )
+    parser.add_argument(
+        "--scorer",
+        choices=["paraphrase", "exact"],
+        default="paraphrase",
+        help=(
+            "paraphrase: tolerant of surface-form differences (default). "
+            "exact: strict case/whitespace-insensitive string match, kept "
+            "to reproduce the original numbers."
+        ),
+    )
     args = parser.parse_args()
 
     tracker.configure()
     factories = REAL_LLM_LOOP_FACTORIES if args.llm == "groq" else LOOP_FACTORIES
-    run_all(loop_factories=factories)
+    run_all(loop_factories=factories, scorer=SCORERS[args.scorer])
 
 
 if __name__ == "__main__":
