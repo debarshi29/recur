@@ -1,7 +1,8 @@
 """
 Reflection loop: generate an initial answer, critique it, revise if the
-critique flags a problem, repeat until the critique accepts the draft or
-max_iterations is hit.
+critique flags a problem, repeat until the critique accepts the draft,
+max_critique_rounds is hit (the draft is force-accepted), or
+max_iterations is hit (the best draft seen is used as a fallback).
 
 Draft generation can call tools via the same ACTION/FINAL_ANSWER protocol
 ReAct uses (loops/common.py), so Reflection has the same underlying
@@ -42,6 +43,8 @@ class ReflectionState(TypedDict):
     draft: str | None
     feedback: str | None
     final_answer: str | None
+    critique_rounds: int
+    best_draft: str | None
 
 
 def build_draft_prompt(
@@ -81,11 +84,31 @@ def build_critique_prompt(task: Task, draft: str) -> str:
 
 
 class ReflectionLoop(AgentLoop):
+    """
+    Convergence bound: a real, capable critic can nitpick a
+    correct-but-imperfect draft indefinitely rather than ever emitting
+    GOOD (see docs/writeup.md's real-LLM section -- Reflection's critique
+    step trended toward `max_iterations` with a 0% GOOD-convergence rate).
+    `max_critique_rounds` caps how many REVISE rounds are honored,
+    separate from and typically tighter than `max_iterations`; once hit,
+    the current draft is force-accepted rather than discarded. On any
+    cap-out (including the pre-existing `max_iterations` bound), the loop
+    falls back to `best_draft` -- the most recent non-None draft seen --
+    instead of returning an empty final answer.
+    """
+
     name = "reflection"
 
-    def __init__(self, tools: list[Tool], llm: LLM, config: LoopRunConfig | None = None):
+    def __init__(
+        self,
+        tools: list[Tool],
+        llm: LLM,
+        config: LoopRunConfig | None = None,
+        max_critique_rounds: int = 3,
+    ):
         super().__init__(tools, config)
         self.llm = llm
+        self.max_critique_rounds = max_critique_rounds
         self.checkpointer = new_checkpointer()
         self._graph = self._build_graph()
 
@@ -117,6 +140,7 @@ class ReflectionLoop(AgentLoop):
         step: dict[str, Any] = {"stage": "draft", "thought": text}
         if text.startswith(FINAL_PREFIX):
             state["draft"] = text[len(FINAL_PREFIX):].strip()
+            state["best_draft"] = state["draft"]
         state["trace"].append(step)
         return state
 
@@ -137,21 +161,27 @@ class ReflectionLoop(AgentLoop):
         response = self.llm.generate(prompt)
         state["total_tokens"] += response.total_tokens
         state["iteration"] += 1
+        state["critique_rounds"] += 1
         text = response.text.strip()
         state["trace"].append({"stage": "critique", "thought": text})
-        if text.startswith(REVISE_PREFIX):
+        if text.startswith(REVISE_PREFIX) and state["critique_rounds"] < self.max_critique_rounds:
             state["feedback"] = text[len(REVISE_PREFIX):].strip()
             state["draft"] = None  # discard the unrevised draft so a stale
             # value can't be mistaken for a fresh one on the next round
         else:
+            # Either the critic said GOOD, or it hit max_critique_rounds --
+            # force-accept the current draft rather than revise forever.
             state["final_answer"] = state["draft"]
         return state
 
     def _route_after_draft(self, state: ReflectionState) -> str:
+        # Routing functions only decide the next node -- they must not
+        # mutate state, since a router's writes aren't persisted the way
+        # a node's return value is (no node runs afterward to capture
+        # them). Cap-out fallback to best_draft is handled in run().
         if state["draft"] is not None:
             return "critique"
         if state["iteration"] >= self.config.max_iterations:
-            state["final_answer"] = ""
             return "end"
         return "observe"
 
@@ -159,7 +189,6 @@ class ReflectionLoop(AgentLoop):
         if state["final_answer"] is not None:
             return "end"
         if state["iteration"] >= self.config.max_iterations:
-            state["final_answer"] = ""
             return "end"
         return "revise"
 
@@ -174,6 +203,8 @@ class ReflectionLoop(AgentLoop):
             "draft": None,
             "feedback": None,
             "final_answer": None,
+            "critique_rounds": 0,
+            "best_draft": None,
         }
         final_state = run_graph(
             self._graph,
@@ -182,7 +213,12 @@ class ReflectionLoop(AgentLoop):
             timeout_s=self.config.timeout_s,
             recursion_limit=self.config.max_iterations * 6 + 10,
         )
-        predicted = final_state.get("final_answer") or ""
+        # final_answer stays None when max_iterations is hit mid-revision
+        # (no node runs afterward to set it) -- fall back to the last
+        # real draft seen rather than an empty answer.
+        predicted = final_state.get("final_answer")
+        if predicted is None:
+            predicted = final_state.get("best_draft") or ""
         correct, score = scorer(predicted, task.gold_answer)
         return TaskResult(
             task_id=task.id,
