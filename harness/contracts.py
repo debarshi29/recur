@@ -8,6 +8,7 @@ control-loop architecture differs.
 """
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -96,6 +97,32 @@ ScoringFn = Callable[[str, str], tuple[bool, float]]  # (predicted, gold) -> (co
 def exact_match_scorer(predicted: str, gold: str) -> tuple[bool, float]:
     ok = predicted.strip().lower() == gold.strip().lower()
     return ok, 1.0 if ok else 0.0
+
+
+def _normalize_for_paraphrase(text: str) -> str:
+    """Lowercase, strip, and drop punctuation so surface-form differences
+    (trailing periods, commas) don't affect comparison."""
+    return re.sub(r"[^\w\s]", "", text.strip().lower())
+
+
+def paraphrase_scorer(predicted: str, gold: str) -> tuple[bool, float]:
+    """Tolerant scorer for free-text LLM answers: exact_match_scorer marks
+    substantively-correct answers wrong over trivial phrasing/punctuation
+    differences (see docs/writeup.md's real-LLM section, e.g. "when
+    features are sparse." vs "when features are sparse"). This normalizes
+    punctuation/case first, then falls back to a token-containment check
+    (every gold word appears somewhere in the prediction) so answers with
+    extra connective words -- "Elhage et al. in 2021." vs gold
+    "Elhage et al., 2021" -- still count as correct, at a lower confidence
+    score than an exact normalized match."""
+    p_norm, g_norm = _normalize_for_paraphrase(predicted), _normalize_for_paraphrase(gold)
+    if p_norm == g_norm:
+        return True, 1.0
+    g_tokens = set(g_norm.split())
+    p_tokens = set(p_norm.split())
+    if g_tokens and g_tokens.issubset(p_tokens):
+        return True, 0.9
+    return False, 0.0
 
 
 # ---------------------------------------------------------------------------
