@@ -40,6 +40,32 @@ accuracy is 0% uniformly across all three loops here (see
 expected weakness -- wandering or failing to backtrack on multi-hop
 questions that need combining facts across more than one search.
 
+## Real-LLM run (Groq `llama-3.3-70b-versatile`)
+
+That validation has now happened -- see `docs/writeup.md`'s real-LLM
+section for the full run and both scorer/convergence-bound fixes it
+surfaced. ReAct came out as both the cheapest *and* the most accurate
+pattern on this 18-task benchmark:
+
+| metric | value |
+|---|---|
+| accuracy | 88.9% (16/18) |
+| avg iterations/task | 2.00 |
+| avg tool calls/task | 1.00 |
+| avg tokens/task | 546.2 |
+| avg wall-clock/task | 1.3s |
+
+The expected weakness -- wandering or failing to combine facts across
+more than one search on multi-hop questions -- didn't show up as the
+dominant effect here: Reflection's critique step and Plan-Execute's
+upfront plan both cost more tokens and wall-clock for *worse* accuracy
+(83.3% and 72.2% respectively) on this benchmark. That doesn't mean
+ReAct's lack of lookahead is never a liability, only that this
+particular 18-task, mostly-shallow-multi-hop benchmark didn't surface a
+case where it lost to the added machinery -- see `docs/writeup.md`'s
+"Recommendation, by task shape" for the caveat that 18 tasks is still a
+small sample.
+
 ## Consequences
 
 ReAct is the right default when task cost/latency matters more than
