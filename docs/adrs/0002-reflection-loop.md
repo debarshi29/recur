@@ -40,6 +40,33 @@ measure the thing Reflection is actually for: how often that extra call
 turns a wrong draft into a right one, and whether that revision rate
 justifies the added cost.
 
+## Real-LLM run (Groq `llama-3.3-70b-versatile`)
+
+That measurement has now happened, and it surfaced a real architectural
+gap the mock run couldn't show -- see `docs/writeup.md`'s real-LLM
+section for the full trace evidence:
+
+| metric | value |
+|---|---|
+| accuracy | 83.3% (15/18) |
+| avg iterations/task | 5.61 |
+| avg tool calls/task | 1.22 |
+| avg tokens/task | 1656.8 |
+| avg wall-clock/task | 13.4s |
+
+The critic **never once converges to `GOOD`** across all 18 tasks --
+it kept finding new, increasingly pedantic objections to substantively
+correct drafts ("lacks... additional context," "unclear... without
+external verification"). Unbounded, that ran every task to
+`max_iterations` with an empty final answer (0% accuracy on the first
+pass). Fixed by `max_critique_rounds` (`loops/reflection_loop.py`,
+default 3): once hit, the current draft is force-accepted instead of
+revised again. The 83.3% above is the loop returning *an* answer instead
+of giving up -- the critic's behavior itself didn't change, and its
+revision path (the reason this pattern exists) still isn't shown to be
+worth its cost on this benchmark: Reflection pays ~3x ReAct's tokens and
+~10x its wall-clock for *worse* accuracy (83.3% vs. 88.9%).
+
 ## Consequences
 
 Reflection's cost is paid on every task, not just the ones where the
