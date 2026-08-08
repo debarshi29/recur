@@ -43,6 +43,34 @@ cost, not the replan-on-failure recovery path -- that path is covered
 directly in `tests/test_plan_execute_loop.py::test_plan_execute_replans_after_a_failed_step`
 via a scripted LLM, but not exercised in the benchmark sweep.
 
+## Real-LLM run (Groq `llama-3.3-70b-versatile`)
+
+The theoretical case for Plan-Execute -- that an upfront plan avoids
+ReAct's step-by-step wandering on genuinely multi-hop tasks -- has now
+been measured directly, not just structurally. See `docs/writeup.md`'s
+real-LLM section for the full run:
+
+| metric | value |
+|---|---|
+| accuracy | 72.2% (13/18) |
+| avg iterations/task | 4.39 |
+| avg tool calls/task | 2.22 |
+| avg tokens/task | 1642.7 |
+| avg wall-clock/task | 10.5s |
+
+That theoretical case isn't borne out on this benchmark: Plan-Execute is
+the least accurate of the three patterns (72.2% vs. ReAct's 88.9% and
+Reflection's 83.3%) despite paying the highest tool-call cost. This is
+now measured under `paraphrase_scorer` (not the original overly-strict
+`exact_match_scorer` that depressed the first pass's numbers uniformly),
+so the gap is a real signal to investigate rather than a scoring
+confound waiting to be ruled out -- see `docs/writeup.md`'s "What the
+first real-LLM pass found" for that history. As with `0001`/`0002`, 18
+tasks is still a small sample and the replan-on-failure path still isn't
+exercised by either sweep, so this doesn't rule out Plan-Execute winning
+on a benchmark with deeper multi-hop dependencies or noisier tool
+failures than this corpus has.
+
 ## Consequences
 
 Plan-Execute's cost scales with plan length, so it's the wrong choice for
